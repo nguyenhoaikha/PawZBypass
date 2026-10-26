@@ -1,931 +1,933 @@
+local Players = game:GetService("Players")
+local HttpService = game:GetService("HttpService")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Player = Players.LocalPlayer
 
+local VERIFY_URL = "https://izoki.bytecraft.workers.dev/verify?key="
+-- Verification always includes the executor HWID when one is available.
+local GUI_NAME = "KhfreshKeySystem"
 
-
-
-
-
-local a=game:GetService"Players"
-local b=game:GetService"HttpService"
-local c=game:GetService"TweenService"
-local d=game:GetService"UserInputService"
-local e=game:GetService"CoreGui"local f=
-a.LocalPlayer
-
-local g="https://izoki.bytecraft.workers.dev/verify?key="
-
-local h="KhfreshKeySystem"
-
-
-
-
-
+--// FREE SCHEDULE (UTC) — os.date("!*t").wday: 1=Sun … 7=Sat
+--// Only Monday (2) and Tuesday (3) are no-key. 6=Fri and 7=Sat are NOT free.
+local FREE_WEEKDAYS_UTC = {
+    [2] = "MONDAY",
+    [3] = "TUESDAY",
+}
 
 local function getUTCDateInfo()
-local i,j=pcall(function()
-return os.date"!*t"
-end)
+    local ok, value = pcall(function()
+        return os.date("!*t")
+    end)
 
-if i and type(j)=="table"and tonumber(j.wday)then
-return j
-end
+    if ok and type(value) == "table" and tonumber(value.wday) then
+        return value
+    end
 
-return nil
+    return nil
 end
 
 local function getUTCDayName()
-local i=getUTCDateInfo()
-if not i then
-return"UNKNOWN"
-end
+    local utc = getUTCDateInfo()
+    if not utc then
+        return "UNKNOWN"
+    end
 
-local j={
-[1]="SUNDAY",
-[2]="MONDAY",
-[3]="TUESDAY",
-[4]="WEDNESDAY",
-[5]="THURSDAY",
-[6]="FRIDAY",
-[7]="SATURDAY",
-}
+    local names = {
+        [1] = "SUNDAY",
+        [2] = "MONDAY",
+        [3] = "TUESDAY",
+        [4] = "WEDNESDAY",
+        [5] = "THURSDAY",
+        [6] = "FRIDAY",
+        [7] = "SATURDAY",
+    }
 
-return j[tonumber(i.wday)]or"UNKNOWN"
+    return names[tonumber(utc.wday)] or "UNKNOWN"
 end
 
 local function isFreeDayUTC()
-return false
+    local utc = getUTCDateInfo()
+    if not utc then
+        -- Fail closed: when UTC cannot be read, require the normal key flow.
+        return false
+    end
+
+    return FREE_WEEKDAYS_UTC[tonumber(utc.wday)] ~= nil
 end
 
-local i=isFreeDayUTC()
-local j=getUTCDayName()
+local FREE_DAY_UTC = isFreeDayUTC()
+local CURRENT_UTC_DAY = getUTCDayName()
 
 pcall(function()
-local k=e:FindFirstChild(h)
-if k then k:Destroy()end
+    local old = CoreGui:FindFirstChild(GUI_NAME)
+    if old then old:Destroy() end
 end)
 
+--// ============================================================
+--// Helpers
+--// ============================================================
 
-
-
-
-local function tween(k,l,m)
-local n,o=pcall(function()
-return c:Create(k,l,m)
-end)
-if n and o then
-o:Play()
-return o
-end
-end
-
-local function requestGet(k)
-local l=syn and syn.request
-if type(l)=="function"then
-return l{Url=k,Method="GET"}
+local function tween(obj, info, props)
+    local ok, tw = pcall(function()
+        return TweenService:Create(obj, info, props)
+    end)
+    if ok and tw then
+        tw:Play()
+        return tw
+    end
 end
 
-local m=rawget(_G,"request")
-if type(m)=="function"then
-return m{Url=k,Method="GET"}
-end
+local function requestGet(url)
+    local synApi = syn and syn.request
+    if type(synApi) == "function" then
+        return synApi({Url = url, Method = "GET"})
+    end
 
-local n=rawget(_G,"http_request")
-if type(n)=="function"then
-return n{Url=k,Method="GET"}
-end
+    local globalRequest = rawget(_G, "request")
+    if type(globalRequest) == "function" then
+        return globalRequest({Url = url, Method = "GET"})
+    end
 
-local o=rawget(_G,"http")
-if type(o)=="table"and type(o.request)=="function"then
-return o.request{Url=k,Method="GET"}
-end
+    local httpRequest = rawget(_G, "http_request")
+    if type(httpRequest) == "function" then
+        return httpRequest({Url = url, Method = "GET"})
+    end
 
-return{
-StatusCode=200,
-Body=game:HttpGet(k)
-}
+    local httpGlobal = rawget(_G, "http")
+    if type(httpGlobal) == "table" and type(httpGlobal.request) == "function" then
+        return httpGlobal.request({Url = url, Method = "GET"})
+    end
+
+    return {
+        StatusCode = 200,
+        Body = game:HttpGet(url)
+    }
 end
 
 local function getStableHWID()
-if type(gethwid)=="function"then
-local k,l=pcall(gethwid)
-if k and l and tostring(l)~=""then
-return tostring(l)
-end
-end
+    if type(gethwid) == "function" then
+        local ok, value = pcall(gethwid)
+        if ok and value and tostring(value) ~= "" then
+            return tostring(value)
+        end
+    end
 
-local k,l=pcall(function()
-return game:GetService"RbxAnalyticsService"
-end)
+    local okService, analytics = pcall(function()
+        return game:GetService("RbxAnalyticsService")
+    end)
 
-if k and l then
-local m,n=pcall(function()
-return l:GetClientId()
-end)
-if m and n and tostring(n)~=""then
-return tostring(n)
-end
-end
+    if okService and analytics then
+        local okClient, clientId = pcall(function()
+            return analytics:GetClientId()
+        end)
+        if okClient and clientId and tostring(clientId) ~= "" then
+            return tostring(clientId)
+        end
+    end
 
-return""
-end
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-local function setClipboard(k)
-k=tostring(k or"")
-
-local l={
-rawget(_G,"setclipboard"),
-rawget(_G,"toclipboard"),
-rawget(_G,"writeclipboard"),
-rawget(_G,"set_clipboard"),
-}
-
-
-pcall(function()
-l[#l+1]=setclipboard
-l[#l+1]=toclipboard
-l[#l+1]=writeclipboard
-l[#l+1]=set_clipboard
-end)
-
-for m,n in ipairs(l)do
-if type(n)=="function"then
-local o=pcall(n,k)
-if o then return true end
-end
+    return ""
 end
 
-local m=syn
-if type(m)=="table"then
-local n=m.write_clipboard or m.setclipboard
-if type(n)=="function"then
-local o=pcall(n,k)
-if o then return true end
-end
-end
+local function getClipboard()
+    local getter = rawget(_G, "getclipboard")
+    if type(getter) == "function" then
+        local ok, value = pcall(getter)
+        if ok and value ~= nil then return tostring(value) end
+    end
 
-return false
-end
+    local getter2 = rawget(_G, "readclipboard")
+    if type(getter2) == "function" then
+        local ok, value = pcall(getter2)
+        if ok and value ~= nil then return tostring(value) end
+    end
 
-local function normalizeKey(k)
-return tostring(k or""):gsub("%s+","")
-end
-
-local function responseStatus(k)
-return tonumber(k and(k.StatusCode or k.Status or k.status_code))or 0
+    return nil
 end
 
-local function responseBody(k)
-return tostring(k and(k.Body or k.body)or"")
+local function setClipboard(value)
+    value = tostring(value or "")
+
+    local candidates = {
+        rawget(_G, "setclipboard"),
+        rawget(_G, "toclipboard"),
+        rawget(_G, "writeclipboard"),
+        rawget(_G, "set_clipboard"),
+    }
+
+    -- Some executors expose clipboard helpers as direct globals rather than _G fields.
+    pcall(function()
+        candidates[#candidates + 1] = setclipboard
+        candidates[#candidates + 1] = toclipboard
+        candidates[#candidates + 1] = writeclipboard
+        candidates[#candidates + 1] = set_clipboard
+    end)
+
+    for _, setter in ipairs(candidates) do
+        if type(setter) == "function" then
+            local ok = pcall(setter, value)
+            if ok then return true end
+        end
+    end
+
+    local synApi = syn
+    if type(synApi) == "table" then
+        local writer = synApi.write_clipboard or synApi.setclipboard
+        if type(writer) == "function" then
+            local ok = pcall(writer, value)
+            if ok then return true end
+        end
+    end
+
+    return false
 end
 
-
-
-
-
-local k=Instance.new"ScreenGui"
-k.Name=h
-k.ResetOnSpawn=false
-k.IgnoreGuiInset=true
-k.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
-k.Parent=e
-
-local l=Instance.new"Frame"
-l.Size=UDim2.fromScale(1,1)
-l.BackgroundColor3=Color3.fromRGB(0,0,0)
-l.BackgroundTransparency=0.55
-l.BorderSizePixel=0
-l.Active=true
-l.ZIndex=1
-l.Parent=k
-
-local m=Instance.new"Frame"
-m.Size=UDim2.fromOffset(560,430)
-m.Position=UDim2.new(0.5,-280,0.5,-215)
-m.BackgroundColor3=Color3.fromRGB(11,11,14)
-m.BorderSizePixel=0
-m.Active=true
-m.ZIndex=2
-m.Parent=k
-
-local n=Instance.new"UICorner"
-n.CornerRadius=UDim.new(0,20)
-n.Parent=m
-
-local o=Instance.new"UIStroke"
-o.Color=Color3.fromRGB(58,58,68)
-o.Thickness=1.25
-o.Transparency=0.1
-o.Parent=m
-
-local p=Instance.new"ImageLabel"
-p.Size=UDim2.new(1,80,1,80)
-p.Position=UDim2.new(0.5,0,0.5,8)
-p.AnchorPoint=Vector2.new(0.5,0.5)
-p.BackgroundTransparency=1
-p.Image="rbxassetid://6014261993"
-p.ImageColor3=Color3.fromRGB(0,0,0)
-p.ImageTransparency=0.38
-p.ZIndex=1
-p.Parent=m
-
-local q=Instance.new"Frame"
-q.Size=UDim2.new(1,0,0,70)
-q.BackgroundTransparency=1
-q.Active=true
-q.ZIndex=5
-q.Parent=m
-
-local r=Instance.new"Frame"
-r.Size=UDim2.new(1,-36,0,1)
-r.Position=UDim2.fromOffset(18,69)
-r.BackgroundColor3=Color3.fromRGB(43,43,51)
-r.BorderSizePixel=0
-r.ZIndex=5
-r.Parent=m
-
-local s=Instance.new"Frame"
-s.Size=UDim2.fromOffset(42,42)
-s.Position=UDim2.fromOffset(18,14)
-s.BackgroundColor3=Color3.fromRGB(31,31,37)
-s.BorderSizePixel=0
-s.ZIndex=6
-s.Parent=m
-
-local t=Instance.new"UICorner"
-t.CornerRadius=UDim.new(0,13)
-t.Parent=s
-
-local u=Instance.new"TextLabel"
-u.Size=UDim2.fromScale(1,1)
-u.BackgroundTransparency=1
-u.Font=Enum.Font.GothamBlack
-u.Text="K"
-u.TextSize=25
-u.TextColor3=Color3.fromRGB(255,255,255)
-u.ZIndex=7
-u.Parent=s
-
-local v=Instance.new"TextLabel"
-v.Size=UDim2.new(1,-160,0,25)
-v.Position=UDim2.fromOffset(72,13)
-v.BackgroundTransparency=1
-v.Font=Enum.Font.GothamBold
-v.Text="KHFRESH HUB"
-v.TextSize=18
-v.TextColor3=Color3.fromRGB(250,250,252)
-v.TextXAlignment=Enum.TextXAlignment.Left
-v.ZIndex=6
-v.Parent=m
-
-local w=Instance.new"TextLabel"
-w.Size=UDim2.new(1,-160,0,18)
-w.Position=UDim2.fromOffset(72,38)
-w.BackgroundTransparency=1
-w.Font=Enum.Font.Gotham
-w.Text="IZOKI AUTH  •  KEY VERIFICATION"
-w.TextSize=10
-w.TextColor3=Color3.fromRGB(124,124,136)
-w.TextXAlignment=Enum.TextXAlignment.Left
-w.ZIndex=6
-w.Parent=m
-
-local x=Instance.new"TextButton"
-x.Size=UDim2.fromOffset(32,32)
-x.Position=UDim2.new(1,-48,0,17)
-x.BackgroundColor3=Color3.fromRGB(24,24,29)
-x.BorderSizePixel=0
-x.AutoButtonColor=false
-x.Font=Enum.Font.GothamBold
-x.Text="×"
-x.TextSize=22
-x.TextColor3=Color3.fromRGB(160,160,170)
-x.ZIndex=7
-x.Parent=m
-
-local y=Instance.new"UICorner"
-y.CornerRadius=UDim.new(0,10)
-y.Parent=x
-
-local function makeLabel(z,A,B,C,D,E,F)
-local G=Instance.new"TextLabel"
-G.BackgroundTransparency=1
-G.Position=B
-G.Size=C
-G.Font=D
-G.Text=A
-G.TextSize=E
-G.TextColor3=F
-G.TextXAlignment=Enum.TextXAlignment.Left
-G.ZIndex=7
-G.Parent=z
-return G
+local function normalizeKey(value)
+    return tostring(value or ""):gsub("%s+", "")
 end
 
-makeLabel(
-m,
-"ACCESS KEY",
-UDim2.fromOffset(20,86),
-UDim2.new(1,-40,0,20),
-Enum.Font.GothamBold,
-11,
-Color3.fromRGB(220,220,226)
+local function responseStatus(response)
+    return tonumber(response and (response.StatusCode or response.Status or response.status_code)) or 0
+end
+
+local function responseBody(response)
+    return tostring(response and (response.Body or response.body) or "")
+end
+
+--// ============================================================
+--// GUI ROOT
+--// ============================================================
+
+local Gui = Instance.new("ScreenGui")
+Gui.Name = GUI_NAME
+Gui.ResetOnSpawn = false
+Gui.IgnoreGuiInset = true
+Gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+Gui.Parent = CoreGui
+
+local Overlay = Instance.new("Frame")
+Overlay.Size = UDim2.fromScale(1, 1)
+Overlay.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+Overlay.BackgroundTransparency = 0.55
+Overlay.BorderSizePixel = 0
+Overlay.Active = true
+Overlay.ZIndex = 1
+Overlay.Parent = Gui
+
+local Main = Instance.new("Frame")
+Main.Size = UDim2.fromOffset(560, 430)
+Main.Position = UDim2.new(0.5, -280, 0.5, -215)
+Main.BackgroundColor3 = Color3.fromRGB(11, 11, 14)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.ZIndex = 2
+Main.Parent = Gui
+
+local MainCorner = Instance.new("UICorner")
+MainCorner.CornerRadius = UDim.new(0, 20)
+MainCorner.Parent = Main
+
+local MainStroke = Instance.new("UIStroke")
+MainStroke.Color = Color3.fromRGB(58, 58, 68)
+MainStroke.Thickness = 1.25
+MainStroke.Transparency = 0.1
+MainStroke.Parent = Main
+
+local Shadow = Instance.new("ImageLabel")
+Shadow.Size = UDim2.new(1, 80, 1, 80)
+Shadow.Position = UDim2.new(0.5, 0, 0.5, 8)
+Shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+Shadow.BackgroundTransparency = 1
+Shadow.Image = "rbxassetid://6014261993"
+Shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+Shadow.ImageTransparency = 0.38
+Shadow.ZIndex = 1
+Shadow.Parent = Main
+
+local TopBar = Instance.new("Frame")
+TopBar.Size = UDim2.new(1, 0, 0, 70)
+TopBar.BackgroundTransparency = 1
+TopBar.Active = true
+TopBar.ZIndex = 5
+TopBar.Parent = Main
+
+local Divider = Instance.new("Frame")
+Divider.Size = UDim2.new(1, -36, 0, 1)
+Divider.Position = UDim2.fromOffset(18, 69)
+Divider.BackgroundColor3 = Color3.fromRGB(43, 43, 51)
+Divider.BorderSizePixel = 0
+Divider.ZIndex = 5
+Divider.Parent = Main
+
+local LogoBG = Instance.new("Frame")
+LogoBG.Size = UDim2.fromOffset(42, 42)
+LogoBG.Position = UDim2.fromOffset(18, 14)
+LogoBG.BackgroundColor3 = Color3.fromRGB(31, 31, 37)
+LogoBG.BorderSizePixel = 0
+LogoBG.ZIndex = 6
+LogoBG.Parent = Main
+
+local LogoBGCorner = Instance.new("UICorner")
+LogoBGCorner.CornerRadius = UDim.new(0, 13)
+LogoBGCorner.Parent = LogoBG
+
+local Logo = Instance.new("TextLabel")
+Logo.Size = UDim2.fromScale(1, 1)
+Logo.BackgroundTransparency = 1
+Logo.Font = Enum.Font.GothamBlack
+Logo.Text = "K"
+Logo.TextSize = 25
+Logo.TextColor3 = Color3.fromRGB(255, 255, 255)
+Logo.ZIndex = 7
+Logo.Parent = LogoBG
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -160, 0, 25)
+Title.Position = UDim2.fromOffset(72, 13)
+Title.BackgroundTransparency = 1
+Title.Font = Enum.Font.GothamBold
+Title.Text = "KHFRESH HUB"
+Title.TextSize = 18
+Title.TextColor3 = Color3.fromRGB(250, 250, 252)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.ZIndex = 6
+Title.Parent = Main
+
+local Subtitle = Instance.new("TextLabel")
+Subtitle.Size = UDim2.new(1, -160, 0, 18)
+Subtitle.Position = UDim2.fromOffset(72, 38)
+Subtitle.BackgroundTransparency = 1
+Subtitle.Font = Enum.Font.Gotham
+Subtitle.Text = "IZOKI AUTH  •  KEY VERIFICATION"
+Subtitle.TextSize = 10
+Subtitle.TextColor3 = Color3.fromRGB(124, 124, 136)
+Subtitle.TextXAlignment = Enum.TextXAlignment.Left
+Subtitle.ZIndex = 6
+Subtitle.Parent = Main
+
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.fromOffset(32, 32)
+Close.Position = UDim2.new(1, -48, 0, 17)
+Close.BackgroundColor3 = Color3.fromRGB(24, 24, 29)
+Close.BorderSizePixel = 0
+Close.AutoButtonColor = false
+Close.Font = Enum.Font.GothamBold
+Close.Text = "×"
+Close.TextSize = 22
+Close.TextColor3 = Color3.fromRGB(160, 160, 170)
+Close.ZIndex = 7
+Close.Parent = Main
+
+local CloseCorner = Instance.new("UICorner")
+CloseCorner.CornerRadius = UDim.new(0, 10)
+CloseCorner.Parent = Close
+
+local function makeLabel(parent, text, pos, size, font, textSize, color)
+    local obj = Instance.new("TextLabel")
+    obj.BackgroundTransparency = 1
+    obj.Position = pos
+    obj.Size = size
+    obj.Font = font
+    obj.Text = text
+    obj.TextSize = textSize
+    obj.TextColor3 = color
+    obj.TextXAlignment = Enum.TextXAlignment.Left
+    obj.ZIndex = 7
+    obj.Parent = parent
+    return obj
+end
+
+local KeyTitle = makeLabel(
+    Main,
+    "ACCESS KEY",
+    UDim2.fromOffset(20, 86),
+    UDim2.new(1, -40, 0, 20),
+    Enum.Font.GothamBold,
+    11,
+    Color3.fromRGB(220, 220, 226)
 )
 
-makeLabel(
-m,
-"Paste your 136-character key below.",
-UDim2.fromOffset(20,109),
-UDim2.new(1,-40,0,18),
-Enum.Font.Gotham,
-10,
-Color3.fromRGB(105,105,116)
+local KeyHint = makeLabel(
+    Main,
+    "Paste your 136-character key below.",
+    UDim2.fromOffset(20, 109),
+    UDim2.new(1, -40, 0, 18),
+    Enum.Font.Gotham,
+    10,
+    Color3.fromRGB(105, 105, 116)
 )
 
-local z=Instance.new"TextBox"
-z.Size=UDim2.new(1,-40,0,48)
-z.Position=UDim2.fromOffset(20,133)
-z.BackgroundColor3=Color3.fromRGB(18,18,23)
-z.BorderSizePixel=0
-z.ClearTextOnFocus=false
-z.Font=Enum.Font.Code
-z.PlaceholderText="Paste key here..."
-z.PlaceholderColor3=Color3.fromRGB(82,82,95)
-z.Text=""
-z.TextColor3=Color3.fromRGB(240,240,246)
-z.TextSize=12
-z.TextXAlignment=Enum.TextXAlignment.Left
-z.ZIndex=8
-z.Parent=m
+local KeyBox = Instance.new("TextBox")
+KeyBox.Size = UDim2.new(1, -40, 0, 48)
+KeyBox.Position = UDim2.fromOffset(20, 133)
+KeyBox.BackgroundColor3 = Color3.fromRGB(18, 18, 23)
+KeyBox.BorderSizePixel = 0
+KeyBox.ClearTextOnFocus = false
+KeyBox.Font = Enum.Font.Code
+KeyBox.PlaceholderText = "Paste key here..."
+KeyBox.PlaceholderColor3 = Color3.fromRGB(82, 82, 95)
+KeyBox.Text = ""
+KeyBox.TextColor3 = Color3.fromRGB(240, 240, 246)
+KeyBox.TextSize = 12
+KeyBox.TextXAlignment = Enum.TextXAlignment.Left
+KeyBox.ZIndex = 8
+KeyBox.Parent = Main
 
-local A=Instance.new"UIPadding"
-A.PaddingLeft=UDim.new(0,14)
-A.PaddingRight=UDim.new(0,14)
-A.Parent=z
+local KeyPadding = Instance.new("UIPadding")
+KeyPadding.PaddingLeft = UDim.new(0, 14)
+KeyPadding.PaddingRight = UDim.new(0, 14)
+KeyPadding.Parent = KeyBox
 
-local B=Instance.new"UICorner"
-B.CornerRadius=UDim.new(0,11)
-B.Parent=z
+local KeyCorner = Instance.new("UICorner")
+KeyCorner.CornerRadius = UDim.new(0, 11)
+KeyCorner.Parent = KeyBox
 
-local C=Instance.new"UIStroke"
-C.Color=Color3.fromRGB(50,50,60)
-C.Thickness=1
-C.Transparency=0.15
-C.Parent=z
+local KeyStroke = Instance.new("UIStroke")
+KeyStroke.Color = Color3.fromRGB(50, 50, 60)
+KeyStroke.Thickness = 1
+KeyStroke.Transparency = 0.15
+KeyStroke.Parent = KeyBox
 
-local D=Instance.new"TextButton"
-D.Size=UDim2.new(0.5,-25,0,40)
-D.Position=UDim2.fromOffset(20,196)
-D.BackgroundColor3=Color3.fromRGB(27,27,33)
-D.BorderSizePixel=0
-D.AutoButtonColor=false
-D.Font=Enum.Font.GothamBold
-D.Text="GET KEY"
-D.TextSize=10
-D.TextColor3=Color3.fromRGB(232,232,238)
-D.ZIndex=8
-D.Parent=m
+local GetKey = Instance.new("TextButton")
+GetKey.Size = UDim2.new(0.5, -25, 0, 40)
+GetKey.Position = UDim2.fromOffset(20, 196)
+GetKey.BackgroundColor3 = Color3.fromRGB(27, 27, 33)
+GetKey.BorderSizePixel = 0
+GetKey.AutoButtonColor = false
+GetKey.Font = Enum.Font.GothamBold
+GetKey.Text = "GET KEY"
+GetKey.TextSize = 10
+GetKey.TextColor3 = Color3.fromRGB(232, 232, 238)
+GetKey.ZIndex = 8
+GetKey.Parent = Main
 
-local E=Instance.new"UICorner"
-E.CornerRadius=UDim.new(0,10)
-E.Parent=D
+local GetKeyCorner = Instance.new("UICorner")
+GetKeyCorner.CornerRadius = UDim.new(0, 10)
+GetKeyCorner.Parent = GetKey
 
-local F=Instance.new"UIStroke"
-F.Color=Color3.fromRGB(52,52,62)
-F.Thickness=1
-F.Parent=D
+local GetKeyStroke = Instance.new("UIStroke")
+GetKeyStroke.Color = Color3.fromRGB(52, 52, 62)
+GetKeyStroke.Thickness = 1
+GetKeyStroke.Parent = GetKey
 
-makeLabel(
-m,
-"SECURE LOADER",
-UDim2.fromOffset(20,252),
-UDim2.new(1,-40,0,20),
-Enum.Font.GothamBold,
-11,
-Color3.fromRGB(220,220,226)
+local InfoTitle = makeLabel(
+    Main,
+    "SECURE LOADER",
+    UDim2.fromOffset(20, 252),
+    UDim2.new(1, -40, 0, 20),
+    Enum.Font.GothamBold,
+    11,
+    Color3.fromRGB(220, 220, 226)
 )
 
-local G=makeLabel(
-m,
-"GET KEY copies the current IZOKI website. VERIFY KEY checks your key and runs the embedded script.",
-UDim2.fromOffset(20,273),
-UDim2.new(1,-40,0,30),
-Enum.Font.Gotham,
-10,
-Color3.fromRGB(105,105,116)
+local InfoHint = makeLabel(
+    Main,
+    "GET KEY copies the current IZOKI website. VERIFY KEY checks your key and runs the embedded script.",
+    UDim2.fromOffset(20, 273),
+    UDim2.new(1, -40, 0, 30),
+    Enum.Font.Gotham,
+    10,
+    Color3.fromRGB(105, 105, 116)
 )
-G.TextWrapped=true
-G.TextYAlignment=Enum.TextYAlignment.Top
+InfoHint.TextWrapped = true
+InfoHint.TextYAlignment = Enum.TextYAlignment.Top
 
-local H=Instance.new"TextButton"
-H.Size=UDim2.new(0.5,-25,0,40)
-H.Position=UDim2.new(0.5,5,0,196)
-H.BackgroundColor3=Color3.fromRGB(255,255,255)
-H.BorderSizePixel=0
-H.AutoButtonColor=false
-H.Font=Enum.Font.GothamBold
-H.Text="VERIFY KEY"
-H.TextSize=11
-H.TextColor3=Color3.fromRGB(0,0,0)
-H.ZIndex=8
-H.Parent=m
+local Verify = Instance.new("TextButton")
+Verify.Size = UDim2.new(0.5, -25, 0, 40)
+Verify.Position = UDim2.new(0.5, 5, 0, 196)
+Verify.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+Verify.BorderSizePixel = 0
+Verify.AutoButtonColor = false
+Verify.Font = Enum.Font.GothamBold
+Verify.Text = "VERIFY KEY"
+Verify.TextSize = 11
+Verify.TextColor3 = Color3.fromRGB(0, 0, 0)
+Verify.ZIndex = 8
+Verify.Parent = Main
 
-local I=Instance.new"UICorner"
-I.CornerRadius=UDim.new(0,11)
-I.Parent=H
+local VerifyCorner = Instance.new("UICorner")
+VerifyCorner.CornerRadius = UDim.new(0, 11)
+VerifyCorner.Parent = Verify
 
-local J=Instance.new"UIStroke"
-J.Color=Color3.fromRGB(225,225,230)
-J.Thickness=1
-J.Transparency=0.1
-J.Parent=H
+local VerifyStroke = Instance.new("UIStroke")
+VerifyStroke.Color = Color3.fromRGB(225, 225, 230)
+VerifyStroke.Thickness = 1
+VerifyStroke.Transparency = 0.1
+VerifyStroke.Parent = Verify
 
 
 
-local K=makeLabel(
-m,
-"● Waiting for key",
-UDim2.fromOffset(20,320),
-UDim2.new(1,-40,0,20),
-Enum.Font.GothamMedium,
-10,
-Color3.fromRGB(118,118,130)
+local Status = makeLabel(
+    Main,
+    "● Waiting for key",
+    UDim2.fromOffset(20, 320),
+    UDim2.new(1, -40, 0, 20),
+    Enum.Font.GothamMedium,
+    10,
+    Color3.fromRGB(118, 118, 130)
 )
 
-local L=makeLabel(
-m,
-"IZOKI AUTH  •  izoki.bytecraft.workers.dev",
-UDim2.fromOffset(20,0),
-UDim2.new(1,-40,0,18),
-Enum.Font.Gotham,
-9,
-Color3.fromRGB(68,68,78)
+local Footer = makeLabel(
+    Main,
+    "IZOKI AUTH  •  izoki.bytecraft.workers.dev",
+    UDim2.fromOffset(20, 0),
+    UDim2.new(1, -40, 0, 18),
+    Enum.Font.Gotham,
+    9,
+    Color3.fromRGB(68, 68, 78)
 )
-L.Position=UDim2.new(0,20,1,-20)
-L.TextXAlignment=Enum.TextXAlignment.Right
+Footer.Position = UDim2.new(0, 20, 1, -20)
+Footer.TextXAlignment = Enum.TextXAlignment.Right
 
 
+--// ============================================================
+--// Button feedback
+--// ============================================================
 
-
-
-
-local function hoverButton(M,N,O)
-M.MouseEnter:Connect(function()
-tween(M,TweenInfo.new(0.13,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-BackgroundColor3=O
-})
-end)
-M.MouseLeave:Connect(function()
-tween(M,TweenInfo.new(0.13,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-BackgroundColor3=N
-})
-end)
+local function hoverButton(button, normal, over)
+    button.MouseEnter:Connect(function()
+        tween(button, TweenInfo.new(0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundColor3 = over
+        })
+    end)
+    button.MouseLeave:Connect(function()
+        tween(button, TweenInfo.new(0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            BackgroundColor3 = normal
+        })
+    end)
 end
 
-hoverButton(D,Color3.fromRGB(27,27,33),Color3.fromRGB(41,41,49))
-hoverButton(H,Color3.fromRGB(255,255,255),Color3.fromRGB(222,222,222))
-hoverButton(x,Color3.fromRGB(24,24,29),Color3.fromRGB(48,48,56))
+hoverButton(GetKey, Color3.fromRGB(27, 27, 33), Color3.fromRGB(41, 41, 49))
+hoverButton(Verify, Color3.fromRGB(255, 255, 255), Color3.fromRGB(222, 222, 222))
+hoverButton(Close, Color3.fromRGB(24, 24, 29), Color3.fromRGB(48, 48, 56))
 
+--// ============================================================
+--// Get Key
+--// ============================================================
 
-
-
-
-local M="https://izoki.bytecraft.workers.dev/"
-local N="KhfreshKeySystem/izoki_key.txt"
+local GET_KEY_URL = "https://izoki.bytecraft.workers.dev/"
+local KEY_FILE_NAME = "KhfreshKeySystem/izoki_key.txt"
 
 local function canUseFileApi()
-return type(isfile)=="function"
-and type(readfile)=="function"
-and type(writefile)=="function"
+    return type(isfile) == "function"
+        and type(readfile) == "function"
+        and type(writefile) == "function"
 end
 
 local function ensureFolder()
-local O=rawget(_G,"makefolder")
-if type(O)~="function"then
-O=makefolder
-end
-if type(O)~="function"then return end
-pcall(function()
-if type(isfolder)=="function"then
-if not isfolder"KhfreshKeySystem"then
-O"KhfreshKeySystem"
-end
-else
-O"KhfreshKeySystem"
-end
-end)
+    local makefolderFn = rawget(_G, "makefolder")
+    if type(makefolderFn) ~= "function" then
+        makefolderFn = makefolder
+    end
+    if type(makefolderFn) ~= "function" then return end
+    pcall(function()
+        if type(isfolder) == "function" then
+            if not isfolder("KhfreshKeySystem") then
+                makefolderFn("KhfreshKeySystem")
+            end
+        else
+            makefolderFn("KhfreshKeySystem")
+        end
+    end)
 end
 
-local function saveKey(O)
-if not canUseFileApi()then
-return false
-end
-O=normalizeKey(O)
-if O==""then return false end
-ensureFolder()
-local P=pcall(function()
-writefile(N,O)
-end)
-if not P then return false end
+local function saveKey(key)
+    if not canUseFileApi() then
+        return false
+    end
+    key = normalizeKey(key)
+    if key == "" then return false end
+    ensureFolder()
+    local ok = pcall(function()
+        writefile(KEY_FILE_NAME, key)
+    end)
+    if not ok then return false end
 
-local Q,R=pcall(function()
-return readfile(N)
-end)
-return Q and normalizeKey(R)==O
+    local verifyOk, saved = pcall(function()
+        return readfile(KEY_FILE_NAME)
+    end)
+    return verifyOk and normalizeKey(saved) == key
 end
 
 local function loadSavedKey()
-if not canUseFileApi()then
-return nil
-end
-local O=false
-pcall(function()
-O=isfile(N)
-end)
-if not O then return nil end
+    if not canUseFileApi() then
+        return nil
+    end
+    local exists = false
+    pcall(function()
+        exists = isfile(KEY_FILE_NAME)
+    end)
+    if not exists then return nil end
 
-local P,Q=pcall(function()
-return readfile(N)
-end)
-if not P or Q==nil then return nil end
+    local ok, value = pcall(function()
+        return readfile(KEY_FILE_NAME)
+    end)
+    if not ok or value == nil then return nil end
 
-local R=normalizeKey(Q)
-if R==""then return nil end
-return R
+    local key = normalizeKey(value)
+    if key == "" then return nil end
+    return key
 end
 
 local function deleteSavedKey()
-local O=rawget(_G,"delfile")
-if type(O)~="function"then return end
-pcall(function()
-if type(isfile)~="function"or isfile(N)then
-O(N)
-end
-end)
+    local deleter = rawget(_G, "delfile")
+    if type(deleter) ~= "function" then return end
+    pcall(function()
+        if type(isfile) ~= "function" or isfile(KEY_FILE_NAME) then
+            deleter(KEY_FILE_NAME)
+        end
+    end)
 end
 
 local function hideKeySystem()
-pcall(function()
-local O=TweenInfo.new(0.22,Enum.EasingStyle.Quad,Enum.EasingDirection.In)
-tween(m,O,{Size=UDim2.fromOffset(0,0)})
-tween(l,O,{BackgroundTransparency=1})
-end)
-task.wait(0.23)
-pcall(function()
-if k and k.Parent then k:Destroy()end
-end)
+    pcall(function()
+        local closeTween = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        tween(Main, closeTween, {Size = UDim2.fromOffset(0, 0)})
+        tween(Overlay, closeTween, {BackgroundTransparency = 1})
+    end)
+    task.wait(0.23)
+    pcall(function()
+        if Gui and Gui.Parent then Gui:Destroy() end
+    end)
 end
 
-D.MouseButton1Click:Connect(function()
-local O=setClipboard(M)
-if O then
-K.Text="● Link copied successfully"
-K.TextColor3=Color3.fromRGB(112,220,148)
-D.Text="COPIED"
-task.delay(1.1,function()
-if D and D.Parent then
-D.Text="GET KEY"
-end
-end)
-else
-K.Text="● Clipboard unavailable"
-K.TextColor3=Color3.fromRGB(255,171,90)
-warn("[KHFRESH] Copy failed. Copy manually: "..M)
-end
-end)
-
-
-x.MouseButton1Click:Connect(function()
-hideKeySystem()
+GetKey.MouseButton1Click:Connect(function()
+    local ok = setClipboard(GET_KEY_URL)
+    if ok then
+        Status.Text = "● Link copied successfully"
+        Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+        GetKey.Text = "COPIED"
+        task.delay(1.1, function()
+            if GetKey and GetKey.Parent then
+                GetKey.Text = "GET KEY"
+            end
+        end)
+    else
+        Status.Text = "● Clipboard unavailable"
+        Status.TextColor3 = Color3.fromRGB(255, 171, 90)
+        warn("[KHFRESH] Copy failed. Copy manually: " .. GET_KEY_URL)
+    end
 end)
 
 
-
-
-
-local O=false
-local P
-local Q
-
-q.InputBegan:Connect(function(R)
-if R.UserInputType==Enum.UserInputType.MouseButton1
-or R.UserInputType==Enum.UserInputType.Touch then
-O=true
-P=R.Position
-Q=m.Position
-
-R.Changed:Connect(function()
-if R.UserInputState==Enum.UserInputState.End then
-O=false
-end
-end)
-end
+Close.MouseButton1Click:Connect(function()
+    hideKeySystem()
 end)
 
-d.InputChanged:Connect(function(R)
-if not O then return end
-if R.UserInputType~=Enum.UserInputType.MouseMovement
-and R.UserInputType~=Enum.UserInputType.Touch then
-return
-end
+--// ============================================================
+--// Drag using the top bar only
+--// ============================================================
 
-local S=R.Position-P
-m.Position=UDim2.new(
-Q.X.Scale,
-Q.X.Offset+S.X,
-Q.Y.Scale,
-Q.Y.Offset+S.Y
-)
+local dragging = false
+local dragStart = nil
+local startPos = nil
+
+TopBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
 end)
 
+UserInputService.InputChanged:Connect(function(input)
+    if not dragging then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+        and input.UserInputType ~= Enum.UserInputType.Touch then
+        return
+    end
 
+    local delta = input.Position - dragStart
+    Main.Position = UDim2.new(
+        startPos.X.Scale,
+        startPos.X.Offset + delta.X,
+        startPos.Y.Scale,
+        startPos.Y.Offset + delta.Y
+    )
+end)
 
+--// ============================================================
+--// Key verification + code execution
+--// ============================================================
 
+local verifying = false
+local verified = false
 
-local R=false
-local S=false
+--// ============================================================
+--// EMBEDDED PAYLOAD
+--// Paste the hub source at the very end of this file; it is executed after verification.
+--// Do not paste the payload into the UI.
+--// ============================================================
+local executeEmbeddedScript
 
-
-
-
-
-
-local T
-
-local function setBusy(U)
-R=U
-H.Active=not U
-D.Active=not U
+local function setBusy(state)
+    verifying = state
+    Verify.Active = not state
+    GetKey.Active = not state
 end
 
 local function shakeKeyBox()
-local U=UDim2.fromOffset(20,133)
-local V={
-UDim2.fromOffset(26,133),
-UDim2.fromOffset(14,133),
-UDim2.fromOffset(24,133),
-U
-}
-for W,X in ipairs(V)do
-tween(z,TweenInfo.new(0.06,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-Position=X
-})
-task.wait(0.06)
-end
+    local base = UDim2.fromOffset(20, 133)
+    local sequence = {
+        UDim2.fromOffset(26, 133),
+        UDim2.fromOffset(14, 133),
+        UDim2.fromOffset(24, 133),
+        base
+    }
+    for _, pos in ipairs(sequence) do
+        tween(KeyBox, TweenInfo.new(0.06, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+            Position = pos
+        })
+        task.wait(0.06)
+    end
 end
 
 local function verifyKey()
-if R then return end
+    if verifying then return end
 
-local U=normalizeKey(z.Text)
-if U==""then
-K.Text="● Enter a key first"
-K.TextColor3=Color3.fromRGB(255,171,90)
-shakeKeyBox()
-return
+    local key = normalizeKey(KeyBox.Text)
+    if key == "" then
+        Status.Text = "● Enter a key first"
+        Status.TextColor3 = Color3.fromRGB(255, 171, 90)
+        shakeKeyBox()
+        return
+    end
+
+    local hwid = getStableHWID()
+    if hwid == "" then
+        Status.Text = "● Could not read executor HWID"
+        Status.TextColor3 = Color3.fromRGB(255, 90, 90)
+        return
+    end
+
+    setBusy(true)
+    Verify.Text = "VERIFYING..."
+    Status.Text = "● Checking key with IZOKI..."
+    Status.TextColor3 = Color3.fromRGB(175, 175, 188)
+
+    local verifyUrl = VERIFY_URL
+        .. HttpService:UrlEncode(key)
+        .. "&hwid="
+        .. HttpService:UrlEncode(hwid)
+
+    local requestOk, response = pcall(function()
+        return requestGet(verifyUrl)
+    end)
+
+    if not requestOk or not response then
+        setBusy(false)
+        Verify.Text = "VERIFY KEY"
+        Status.Text = "● Request failed"
+        Status.TextColor3 = Color3.fromRGB(255, 90, 90)
+        return
+    end
+
+    local statusCode = responseStatus(response)
+    local body = responseBody(response)
+    local valid = false
+    local serverMessage = nil
+    local serverCode = nil
+
+    if type(statusCode) == "number" and statusCode >= 200 and statusCode < 500 then
+        local decodeOk, data = pcall(function()
+            return HttpService:JSONDecode(body)
+        end)
+
+        if decodeOk and type(data) == "table" then
+            valid = data.valid == true or data.success == true
+            serverMessage = data.message
+            serverCode = data.code
+        end
+
+        if not valid then
+            valid = body:find('"valid"%s*:%s*true') ~= nil
+                or body:find('"success"%s*:%s*true') ~= nil
+        end
+    end
+
+    if not valid then
+        setBusy(false)
+        Verify.Text = "VERIFY KEY"
+
+        if serverCode == "HWID_MISMATCH" then
+            Status.Text = "● Key is bound to another device"
+        elseif serverCode == "KEY_EXPIRED" then
+            Status.Text = "● Key expired"
+        elseif serverCode == "KEY_REVOKED" then
+            Status.Text = "● Key revoked"
+        elseif serverCode == "HWID_REQUIRED" then
+            Status.Text = "● HWID is required"
+        elseif serverCode == "INVALID_KEY" or serverCode == "INVALID_KEY_FORMAT" or serverCode == "KEY_NOT_FOUND" then
+            Status.Text = "● Key not found, expired, or deleted"
+        elseif statusCode == 429 then
+            Status.Text = "● Too many verify requests; wait and retry"
+        elseif statusCode >= 500 then
+            Status.Text = "● IZOKI server error; try again later"
+        else
+            Status.Text = "● " .. tostring(serverMessage or "Invalid or expired key")
+        end
+
+        Status.TextColor3 = Color3.fromRGB(255, 90, 90)
+        shakeKeyBox()
+        return
+    end
+
+    verified = true
+    local saved = saveKey(key)
+    if not saved then
+        warn("[KHFRESH] Key verified, but persistent file storage is unavailable in this executor.")
+    end
+    Status.Text = "● Key verified successfully"
+    Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+    Verify.Text = "ACCESS GRANTED"
+
+    -- Hide the key UI as soon as the server approves the key.
+    hideKeySystem()
+    setBusy(false)
+
+    task.spawn(function()
+        executeEmbeddedScript()
+    end)
 end
 
-local V=getStableHWID()
-if V==""then
-K.Text="● Could not read executor HWID"
-K.TextColor3=Color3.fromRGB(255,90,90)
-return
-end
-
-setBusy(true)
-H.Text="VERIFYING..."
-K.Text="● Checking key with IZOKI..."
-K.TextColor3=Color3.fromRGB(175,175,188)
-
-local W=g
-..b:UrlEncode(U)
-.."&hwid="
-..b:UrlEncode(V)
-
-local X,Y=pcall(function()
-return requestGet(W)
+Verify.MouseButton1Click:Connect(function()
+    if verifying then return end
+    verifyKey()
 end)
 
-if not X or not Y then
-setBusy(false)
-H.Text="VERIFY KEY"
-K.Text="● Request failed"
-K.TextColor3=Color3.fromRGB(255,90,90)
-return
-end
+--// ============================================================
+--// Opening animation
+--// ============================================================
 
-local Z=responseStatus(Y)
-local _=responseBody(Y)
-local aa=false
-local ab
-local ac
+Main.Size = UDim2.fromOffset(0, 0)
+Main.Position = UDim2.new(0.5, 0, 0.5, 0)
+Overlay.BackgroundTransparency = 1
 
-if type(Z)=="number"and Z>=200 and Z<500 then
-local ad,ae=pcall(function()
-return b:JSONDecode(_)
-end)
-
-if ad and type(ae)=="table"then
-aa=ae.valid==true or ae.success==true
-ab=ae.message
-ac=ae.code
-end
-
-if not aa then
-aa=_:find'"valid"%s*:%s*true'~=nil
-or _:find'"success"%s*:%s*true'~=nil
-end
-end
-
-if not aa then
-setBusy(false)
-H.Text="VERIFY KEY"
-
-if ac=="HWID_MISMATCH"then
-K.Text="● Key is bound to another device"
-elseif ac=="KEY_EXPIRED"then
-K.Text="● Key expired"
-elseif ac=="KEY_REVOKED"then
-K.Text="● Key revoked"
-elseif ac=="HWID_REQUIRED"then
-K.Text="● HWID is required"
-elseif ac=="INVALID_KEY"or ac=="INVALID_KEY_FORMAT"or ac=="KEY_NOT_FOUND"then
-K.Text="● Key not found, expired, or deleted"
-elseif Z==429 then
-K.Text="● Too many verify requests; wait and retry"
-elseif Z>=500 then
-K.Text="● IZOKI server error; try again later"
-else
-K.Text="● "..tostring(ab or"Invalid or expired key")
-end
-
-K.TextColor3=Color3.fromRGB(255,90,90)
-shakeKeyBox()
-return
-end
-
-S=true
-local ad=saveKey(U)
-if not ad then
-warn"[KHFRESH] Key verified, but persistent file storage is unavailable in this executor."
-end
-K.Text="● Key verified successfully"
-K.TextColor3=Color3.fromRGB(112,220,148)
-H.Text="ACCESS GRANTED"
-
-
-hideKeySystem()
-setBusy(false)
-
-task.spawn(function()
-T()
-end)
-end
-
-H.MouseButton1Click:Connect(function()
-if R then return end
-verifyKey()
-end)
-
-
-
-
-
-m.Size=UDim2.fromOffset(0,0)
-m.Position=UDim2.new(0.5,0,0.5,0)
-l.BackgroundTransparency=1
-
-tween(l,TweenInfo.new(0.22,Enum.EasingStyle.Quad,Enum.EasingDirection.Out),{
-BackgroundTransparency=0.55
+tween(Overlay, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+    BackgroundTransparency = 0.55
 })
 
-tween(m,TweenInfo.new(0.42,Enum.EasingStyle.Quart,Enum.EasingDirection.Out),{
-Size=UDim2.fromOffset(560,430),
-Position=UDim2.new(0.5,-280,0.5,-215)
+tween(Main, TweenInfo.new(0.42, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
+    Size = UDim2.fromOffset(560, 430),
+    Position = UDim2.new(0.5, -280, 0.5, -215)
 })
 
-
-
-
-
-
+--// ============================================================================
+--// AUTO LOGIN FROM SAVED KEY
+--// ============================================================================
+--// If a previously verified key exists, verify it silently and launch the
+--// embedded source without making the user press VERIFY KEY again.
 
 local function autoLoginSavedKey()
-local aa=loadSavedKey()
-if not aa then
-return
+    local savedKey = loadSavedKey()
+    if not savedKey then
+        return
+    end
+
+    task.spawn(function()
+        task.wait(0.18)
+
+        local hwid = getStableHWID()
+        if hwid == "" then
+            Status.Text = "● Saved key found; HWID unavailable"
+            Status.TextColor3 = Color3.fromRGB(255, 171, 90)
+            return
+        end
+
+        setBusy(true)
+        Verify.Text = "AUTO VERIFY..."
+        Status.Text = "● Verifying saved key..."
+        Status.TextColor3 = Color3.fromRGB(175, 175, 188)
+
+        local verifyUrl = VERIFY_URL
+            .. HttpService:UrlEncode(savedKey)
+            .. "&hwid="
+            .. HttpService:UrlEncode(hwid)
+
+        local requestOk, response = pcall(function()
+            return requestGet(verifyUrl)
+        end)
+
+        local statusCode = responseStatus(response)
+        local body = responseBody(response)
+        local valid = false
+        local serverCode = nil
+        local serverMessage = nil
+
+        if requestOk and response and type(statusCode) == "number" and statusCode >= 200 and statusCode < 500 then
+            local decodeOk, data = pcall(function()
+                return HttpService:JSONDecode(body)
+            end)
+            if decodeOk and type(data) == "table" then
+                valid = data.valid == true or data.success == true
+                serverCode = data.code
+                serverMessage = data.message
+            end
+            if not valid then
+                valid = body:find('"valid"%s*:%s*true') ~= nil
+                    or body:find('"success"%s*:%s*true') ~= nil
+            end
+        end
+
+        if not valid then
+            setBusy(false)
+            deleteSavedKey()
+            Verify.Text = "VERIFY KEY"
+            if serverCode == "HWID_MISMATCH" then
+                Status.Text = "● Saved key belongs to another device"
+            elseif serverCode == "KEY_EXPIRED" then
+                Status.Text = "● Saved key expired"
+            elseif serverCode == "KEY_REVOKED" then
+                Status.Text = "● Saved key revoked"
+            elseif serverCode == "INVALID_KEY" or serverCode == "INVALID_KEY_FORMAT" or serverCode == "KEY_NOT_FOUND" then
+                Status.Text = "● Saved key expired, deleted, or no longer exists"
+            elseif statusCode == 429 then
+                Status.Text = "● Too many verify requests; wait and retry"
+            elseif statusCode >= 500 then
+                Status.Text = "● IZOKI server error; try again later"
+            else
+                Status.Text = "● " .. tostring(serverMessage or "Saved key is invalid")
+            end
+            Status.TextColor3 = Color3.fromRGB(255, 90, 90)
+            return
+        end
+
+        verified = true
+        Status.Text = "● Saved key verified"
+        Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+        Verify.Text = "ACCESS GRANTED"
+
+        hideKeySystem()
+        setBusy(false)
+
+        task.spawn(function()
+            executeEmbeddedScript()
+        end)
+    end)
 end
 
-task.spawn(function()
-task.wait(0.18)
-
-local ab=getStableHWID()
-if ab==""then
-K.Text="● Saved key found; HWID unavailable"
-K.TextColor3=Color3.fromRGB(255,171,90)
-return
-end
-
-setBusy(true)
-H.Text="AUTO VERIFY..."
-K.Text="● Verifying saved key..."
-K.TextColor3=Color3.fromRGB(175,175,188)
-
-local ac=g
-..b:UrlEncode(aa)
-.."&hwid="
-..b:UrlEncode(ab)
-
-local ad,ae=pcall(function()
-return requestGet(ac)
-end)
-
-local U=responseStatus(ae)
-local V=responseBody(ae)
-local W=false
-local X
-local Y
-
-if ad and ae and type(U)=="number"and U>=200 and U<500 then
-local Z,_=pcall(function()
-return b:JSONDecode(V)
-end)
-if Z and type(_)=="table"then
-W=_.valid==true or _.success==true
-X=_.code
-Y=_.message
-end
-if not W then
-W=V:find'"valid"%s*:%s*true'~=nil
-or V:find'"success"%s*:%s*true'~=nil
-end
-end
-
-if not W then
-setBusy(false)
-deleteSavedKey()
-H.Text="VERIFY KEY"
-if X=="HWID_MISMATCH"then
-K.Text="● Saved key belongs to another device"
-elseif X=="KEY_EXPIRED"then
-K.Text="● Saved key expired"
-elseif X=="KEY_REVOKED"then
-K.Text="● Saved key revoked"
-elseif X=="INVALID_KEY"or X=="INVALID_KEY_FORMAT"or X=="KEY_NOT_FOUND"then
-K.Text="● Saved key expired, deleted, or no longer exists"
-elseif U==429 then
-K.Text="● Too many verify requests; wait and retry"
-elseif U>=500 then
-K.Text="● IZOKI server error; try again later"
-else
-K.Text="● "..tostring(Y or"Saved key is invalid")
-end
-K.TextColor3=Color3.fromRGB(255,90,90)
-return
-end
-
-S=true
-K.Text="● Saved key verified"
-K.TextColor3=Color3.fromRGB(112,220,148)
-H.Text="ACCESS GRANTED"
-
-hideKeySystem()
-setBusy(false)
-
-task.spawn(function()
-T()
-end)
-end)
-end
+--// ============================================================================
+--// PASTE YOUR HUB SCRIPT BELOW THIS LINE
+--// ============================================================================
+--// KHONG CAN NGOAC LONG STRING; CHI PASTE NGUYEN VAN SOURCE.
+--// Chi can paste NGUYEN VAN full hub source ngay ben duoi dong:
+--//     --// >>> PASTE HUB SOURCE BELOW <<<
+--//
+--// Phan code duoc paste nam TRUC TIEP trong executeEmbeddedScript(),
+--// nen no chi chay sau khi IZOKI verify thanh cong.
+--// ============================================================================
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-local aa=[===============[
+local __KH_HUB_SRC = [===============[
 print([[
  KHFRESH HUB — STATIC UI REWRITE
  UI backend: self-written static library + full Lucide icons
@@ -6216,9 +6218,9 @@ local Config = {
     AutoFarmSecretBoss = false,
     AutoEnzo = false,
     AutoEnzoFightMode = "Normal",
-    AutoEnzoHitCooldown = 0.4,
+    AutoEnzoHitCooldown = 0.15,
     AutoLongDiaohaiFightMode = "Normal",
-    AutoLongDiaohaiHitCooldown = 0.4,
+    AutoLongDiaohaiHitCooldown = 0.15,
     AutoEquipBait = false,
     AutoNameless = false,
     AutoFavourite = false,
@@ -6584,15 +6586,14 @@ KhfreshState = {
     antiBanEnabled = true,
     antiBanConnection = nil,
     antiBanThread = nil,
-    InstantCatchEnabled = false, -- permanently disabled (ban weave)
-    InstantCatchForceOff = true,
+    InstantCatchEnabled = false,
     InstantCatchMode = "Fast",
     InstantCatchAttempts = 0,
     InstantCatchLast = 0,
     InstantCatchLastFish = "",
 
-    AutoEnzoHitCooldown = math.clamp(tonumber(KhfreshUserConfig.AutoEnzoHitCooldown) or 0.4, 0.25, 1.2),
-    AutoLongDiaohaiHitCooldown = math.clamp(tonumber(KhfreshUserConfig.AutoLongDiaohaiHitCooldown) or 0.4, 0.25, 1.2),
+    AutoEnzoHitCooldown = math.clamp(tonumber(KhfreshUserConfig.AutoEnzoHitCooldown) or 0.15, 0.01, 1),
+    AutoLongDiaohaiHitCooldown = math.clamp(tonumber(KhfreshUserConfig.AutoLongDiaohaiHitCooldown) or 0.15, 0.01, 1),
     AutoEnzoFightMode = (KhfreshUserConfig.AutoEnzoFightMode == "Hard"
         or KhfreshUserConfig.AutoEnzoFightMode == "Nightmare")
         and KhfreshUserConfig.AutoEnzoFightMode or "Normal",
@@ -8088,14 +8089,6 @@ for _ = 1, 4 do task.wait() end
 local Fishing = KhfreshState.Fishing
 local MiscFlags = KhfreshState.MiscFlags
 
---------------------------------------------------------------------------------
--- GOD MODE (Fishing session HP — NOT Humanoid.Health)
--- Source: ClientModule/Fishing.luau uses workspace.Fishes[FishID][UserId.."_PlayerHealth"]
--- Death check is CLIENT: if PlayerHealth.Value <= 0 then CleanUp(false/"Dead")
--- Black Tortoise uses HPFloor + Invincible clamp on same NumberValue.
--- Method: keep PlayerHealth.Value at MaxHP / BaseHP every heartbeat while fishing.
---------------------------------------------------------------------------------
-
 -- Forward declarations used by UI callbacks created before the implementations.
 local initAntiAFK
 local stopAntiAFK
@@ -8533,7 +8526,7 @@ local function ensureRodEquipped()
         end
     end
 
-    -- 3) ToggleHotbar slot 1 (main method that works in-game)
+    -- 3) Nexus-style: ToggleHotbar slot 1 (main method that works in-game)
     local toggleHotbar = Events and Events:FindFirstChild("ToggleHotbar")
     if toggleHotbar then
         pcall(function()
@@ -8940,21 +8933,6 @@ do
         if not enabled then
             return
         end
-
-        -- Black Tortoise Bloodline: MINIGAME ONLY (no StartBossFight, no teleport loop)
-        if bossName == "Black Tortoise Bloodline" then
-            KhfreshState.AutoBlackTortoiseEnabled = true
-            KhfreshState.AutoBlackTortoiseMinigame = true
-            if Rhy then Rhy.Enabled = true end
-            Fishing.Flags.AutoSkillCheck = true
-            KhfreshLib:Notify({
-                Title = "Black Tortoise",
-                Message = "Minigame only — Rhythm + QTE (no teleport / no auto start)",
-                Duration = 3
-            })
-            return
-        end
-
         if not StartBossFight then
             KhfreshLib:Notify({Title="Auto Boss", Message="StartBossFight remote is unavailable.", Duration=3})
             return
@@ -8978,6 +8956,8 @@ do
                         fightMode = KhfreshState.AutoEnzoFightMode or "Normal"
                     elseif bossName == "Long Diaohai" then
                         fightMode = KhfreshState.AutoLongDiaohaiFightMode or "Normal"
+                    elseif bossName == "Black Tortoise Bloodline" then
+                        fightMode = "Hard"
                     end
                     local ok = pcall(function() StartBossFight:FireServer(bossName, fightMode or "Normal") end)
                     if ok then lastRequest = tick() end
@@ -9001,18 +8981,30 @@ do
     end
 
     ConfigSection:CreateToggle({ Name = "Auto Enzo", Icon = "zap", Default = false, Callback = function(V) setAutoEnzo(V == true) end })
+    ConfigSection:CreateSlider({
+        Name = "Auto Enzo Hit Cooldown (s)",
+        Range = {0.01, 1},
+        Default = KhfreshState.AutoEnzoHitCooldown,
+        Increment = 0.01,
+        Callback = function(value)
+            KhfreshState.AutoEnzoHitCooldown = math.clamp(tonumber(value) or 0.15, 0.01, 1)
+            KhfreshUserConfig.AutoEnzoHitCooldown = KhfreshState.AutoEnzoHitCooldown
+        end
+    })
     ConfigSection:CreateToggle({
         Name = "Auto Long Diaohai Minigame", Icon = "zap", Default = false,
         Callback = function(V) setAutoBoss("Long Diaohai", V == true) end
     })
-    ConfigSection:CreateToggle({
-        Name = "Auto Black Tortoise Bloodline", Icon = "zap", Default = false,
-        Callback = function(V)
-            setAutoBoss("Black Tortoise Bloodline", V == true)
-            KhfreshState.AutoBlackTortoiseEnabled = V == true
+    ConfigSection:CreateSlider({
+        Name = "Long Diaohai Hit Cooldown (s)",
+        Range = {0.01, 1},
+        Default = KhfreshState.AutoLongDiaohaiHitCooldown,
+        Increment = 0.01,
+        Callback = function(value)
+            KhfreshState.AutoLongDiaohaiHitCooldown = math.clamp(tonumber(value) or 0.15, 0.01, 1)
+            KhfreshUserConfig.AutoLongDiaohaiHitCooldown = KhfreshState.AutoLongDiaohaiHitCooldown
         end
     })
-
     local SecretWeatherSection = FarmingTab:CreateSection("Smart Secret Weather Override")
     SecretWeatherSection:CreateToggle({
         Name = "Auto Override On Weather",
@@ -9250,7 +9242,7 @@ do
     -- ===== AUTO NAMELESS OCTOPARASITE =====
     do
         local NAMELESS_NAME = "Nameless Octoparasite"
-        -- Khfresh Rhythm (Safe): lag-compensated band + key/firesignal press
+        -- Nexus-style Rhythm (Safe): lag-compensated band + key/firesignal press
         -- Also used by Black Tortoise Bloodline when Rhythm UI is active
         local RHY_LANES = { "A", "S", "D" }
         local RHY_KEYS = { A = Enum.KeyCode.A, S = Enum.KeyCode.S, D = Enum.KeyCode.D }
@@ -9260,7 +9252,7 @@ do
 
         KhfreshState.Rhythm = {
             Enabled = false,
-            Mode = "Safe", -- Khfresh Safe only (no Risk remote spam)
+            Mode = "Safe", -- Nexus Safe only (no Risk remote spam)
             Band = 0.08,
             Lag = 0.03,
             Active = false,
@@ -9401,7 +9393,7 @@ do
             return c.R >= 0.85 and c.G <= 0.25 and c.B <= 0.25
         end
 
-        -- Khfresh Safe scan: predict note position with lag, press when in band (skip red traps)
+        -- Nexus Safe scan: predict note position with lag, press when in band (skip red traps)
         local function rhyScan(now)
             local gui = rhyGui()
             if not gui then return end
@@ -9421,7 +9413,7 @@ do
                         if note.Name == "Note_FX" and not rhyIsTrapNote(note) then
                             local okP, y = pcall(function() return note.Position.Y.Scale end)
                             if okP and type(y) == "number" then
-                                -- compensate fall speed so we press slightly early (Khfresh)
+                                -- compensate fall speed so we press slightly early (Nexus)
                                 if math.abs((y + RHY_SPEED * lag) - barY) <= band then
                                     inWindow = inWindow + 1
                                 end
@@ -9476,7 +9468,7 @@ do
             end
         end)
 
-        -- Arm even when RhythmStart is late (Khfresh): BossPhaseBGM + BossPhase2Setup
+        -- Arm even when RhythmStart is late (Nexus): BossPhaseBGM + BossPhase2Setup
         pcall(function()
             local evBGM = Events:FindFirstChild("BossPhaseBGM")
             if evBGM then
@@ -9508,7 +9500,7 @@ do
             end
         end)
 
-        -- Heartbeat loop (Khfresh) — not RenderStepped position rewrite
+        -- Heartbeat loop (Nexus) — not RenderStepped position rewrite
         runtimeEnv.KhfreshRhyLoop = RunService.Heartbeat:Connect(function()
             if not alive() or not Rhy.Enabled then return end
             local now = tick()
@@ -9533,7 +9525,7 @@ do
                 if value then
                     KhfreshLib:Notify({
                         Title = "Auto Nameless",
-                        Message = "ON — Khfresh Safe rhythm (lag band + skip red notes)",
+                        Message = "ON — Nexus Safe rhythm (lag band + skip red notes)",
                         Duration = 3,
                     })
                 else
@@ -9546,24 +9538,82 @@ do
     end
 
     -- ===== AUTO BLACK TORTOISE BLOODLINE =====
-    -- MINIGAME ONLY: Rhythm + BossFightBar QTE (no teleport / no StartBossFight / no farm loop)
+    -- Auto Minigame = ONLY Rhythm x1 + Boss QTE (no TP / no farm)
+    -- Auto Black Tortoise = FULL: TP + equip + cast + minigame
     do
         local TORTOISE_NAME = "Black Tortoise Bloodline"
+        local tortoiseFullOn = false
         local tortoiseMiniOn = false
+        local tortoiseThread = nil
 
+        local function findTortoiseModel()
+            local roots = {}
+            local ocean = Workspace:FindFirstChild("Ocean")
+            if ocean then
+                local boss = ocean:FindFirstChild("Boss")
+                if boss then table.insert(roots, boss) end
+                table.insert(roots, ocean)
+            end
+            local fishes = Workspace:FindFirstChild("Fishes")
+            if fishes then table.insert(roots, fishes) end
+            local npc = Workspace:FindFirstChild("NPC")
+            if npc then table.insert(roots, npc) end
+            table.insert(roots, Workspace)
+            for _, root in ipairs(roots) do
+                local ok, found = pcall(function()
+                    return root:FindFirstChild(TORTOISE_NAME, true)
+                end)
+                if ok and found then return found end
+            end
+            return nil
+        end
+
+        local function tortoisePivot(inst)
+            if not inst then return nil end
+            local ok, cf = pcall(function()
+                if inst:IsA("BasePart") then return inst.CFrame end
+                if inst:IsA("Model") then
+                    if inst.PrimaryPart then return inst.PrimaryPart.CFrame end
+                    return inst:GetPivot()
+                end
+                local part = inst:FindFirstChildWhichIsA("BasePart", true)
+                return part and part.CFrame or nil
+            end)
+            return (ok and cf) or nil
+        end
+
+        local function teleportToTortoise()
+            local model = findTortoiseModel()
+            if not model then return false, "not found" end
+            local cf = tortoisePivot(model)
+            if not cf then return false, "no pivot" end
+            local char = LocalPlayer.Character
+            local hrp = char and char:FindFirstChild("HumanoidRootPart")
+            if not hrp then return false, "no hrp" end
+            pcall(function()
+                hrp.AssemblyLinearVelocity = Vector3.zero
+                hrp.CFrame = cf + Vector3.new(0, 6, 10)
+            end)
+            return true, "ok"
+        end
+
+        -- Minigame only: Rhythm notes (A/S/D) + BossFightBar QTE
         local function setTortoiseMinigame(on)
             tortoiseMiniOn = on == true
             KhfreshState.AutoBlackTortoiseMinigame = tortoiseMiniOn
-            KhfreshState.AutoBlackTortoiseEnabled = tortoiseMiniOn
+            -- QTE path (BossPhase2Action) — does NOT call StartBossFight
             pcall(function()
-                autoBossEnabled[TORTOISE_NAME] = tortoiseMiniOn
+                autoBossEnabled[TORTOISE_NAME] = tortoiseMiniOn or tortoiseFullOn
                 if refreshAutoBossSkillCheck then refreshAutoBossSkillCheck() end
                 Fishing.Flags.AutoSkillCheck = tortoiseMiniOn
+                    or tortoiseFullOn
                     or autoBossEnabled.Enzo == true
                     or autoBossEnabled["Long Diaohai"] == true
             end)
+            KhfreshState.AutoBlackTortoiseEnabled = tortoiseMiniOn or tortoiseFullOn
+            -- Rhythm x1 (same UI as Nameless InsaneGame)
             if KhfreshState.Rhythm then
-                if tortoiseMiniOn then
+                if tortoiseMiniOn or tortoiseFullOn then
                     KhfreshState.Rhythm.Enabled = true
                     KhfreshState.Rhythm.Mode = "Safe"
                     KhfreshState.Rhythm.Band = 0.08
@@ -9574,7 +9624,28 @@ do
             end
         end
 
+        local function stopTortoiseFullLoop()
+            tortoiseFullOn = false
+            if tortoiseThread then
+                pcall(function() task.cancel(tortoiseThread) end)
+                tortoiseThread = nil
+            end
+        end
+
         local TortoiseSection = FarmingTab:CreateSection("Auto Black Tortoise Bloodline")
+        TortoiseSection:CreateButton({
+            Name = "Teleport to Black Tortoise Bloodline",
+            Callback = function()
+                local ok, reason = teleportToTortoise()
+                KhfreshLib:Notify({
+                    Title = "Black Tortoise",
+                    Message = ok and "Teleported to boss." or ("Cannot TP: " .. tostring(reason)),
+                    Duration = 3
+                })
+            end
+        })
+
+        -- Toggle 1: MINIGAME ONLY
         TortoiseSection:CreateToggle({
             Name = "Auto Minigame (Rhythm + QTE)",
             Default = false,
@@ -9582,9 +9653,72 @@ do
                 setTortoiseMinigame(value == true)
                 KhfreshLib:Notify({
                     Title = "Black Tortoise Minigame",
-                    Message = (value and "ON — Khfresh rhythm + QTE (minigame only)" or "OFF"),
+                    Message = (value and "ON — Nexus Safe rhythm + QTE (no TP)" or "OFF"),
                     Duration = 3
                 })
+            end
+        })
+
+        -- Toggle 2: FULL auto
+        TortoiseSection:CreateToggle({
+            Name = "Auto Black Tortoise (Full)",
+            Default = false,
+            Callback = function(value)
+                value = value == true
+                if not value then
+                    stopTortoiseFullLoop()
+                    -- If minigame toggle still on, keep minigame; else turn all off
+                    if not tortoiseMiniOn then
+                        setTortoiseMinigame(false)
+                    else
+                        KhfreshState.AutoBlackTortoiseEnabled = true
+                    end
+                    KhfreshLib:Notify({ Title = "Black Tortoise Full", Message = "OFF", Duration = 2 })
+                    return
+                end
+                tortoiseFullOn = true
+                -- Full always includes minigame
+                setTortoiseMinigame(true)
+                KhfreshLib:Notify({
+                    Title = "Black Tortoise Full",
+                    Message = "ON — TP + farm + minigame (Rhythm + QTE)",
+                    Duration = 3
+                })
+                if tortoiseThread then
+                    pcall(function() task.cancel(tortoiseThread) end)
+                    tortoiseThread = nil
+                end
+                tortoiseThread = task.spawn(function()
+                    local lastTp = 0
+                    while alive() and tortoiseFullOn do
+                        pcall(function()
+                            Fishing.Flags.MainFarm = true
+                            Fishing.Flags.AutoCast = true
+                            Fishing.Flags.AnchorLock = true
+                            MiscFlags.AutoEquipRod = true
+                            if KhfreshState.Rhythm then
+                                KhfreshState.Rhythm.Enabled = true
+                            end
+                            local model = findTortoiseModel()
+                            if model then
+                                local cf = tortoisePivot(model)
+                                local char = LocalPlayer.Character
+                                local hrp = char and char:FindFirstChild("HumanoidRootPart")
+                                if cf and hrp then
+                                    local dist = (hrp.Position - cf.Position).Magnitude
+                                    local fishing = MainGui and MainGui:FindFirstChild("Fishing")
+                                    local inMini = fishing and fishing.Visible == true
+                                    if dist > 80 and not inMini and (tick() - lastTp) > 6 then
+                                        lastTp = tick()
+                                        hrp.CFrame = cf + Vector3.new(0, 6, 10)
+                                    end
+                                end
+                            end
+                        end)
+                        task.wait(1.25)
+                    end
+                    tortoiseThread = nil
+                end)
             end
         })
     end
@@ -12538,7 +12672,7 @@ do
         return nil
     end
 
-    -- Khfresh ticketGoFire: TP to giver, fire ChooseDialogueOption remote, return
+    -- Nexus-style ticketGoFire: TP to giver, fire ChooseDialogueOption remote, return
     ticketGoFire = function(action)
         if not Events then
             warn("[Khfresh][TicketQuest] Events nil")
@@ -12777,7 +12911,7 @@ do
 
                 local now = tick()
                 local claimRetryInterval = cooldownRemaining == nil and 5 or 2
-                -- Khfresh Auto Claim style: every 3s TP + StartDialogue + Accept
+                -- Nexus Auto Claim style: every 3s TP + StartDialogue + Accept
                 if now - (KhfreshState.ticketLastFire or 0) < 3 then
                     farmAtTicketTargetIsland()
                     return
@@ -12935,7 +13069,7 @@ do
             end
             KhfreshState.autoDoThread = nil
         end)
-        -- Dedicated claim loop (Khfresh Auto Claim) — always tries accept when no quest
+        -- Dedicated claim loop (Nexus Auto Claim) — always tries accept when no quest
         if KhfreshState.autoClaimThread then
             pcall(function() task.cancel(KhfreshState.autoClaimThread) end)
             KhfreshState.autoClaimThread = nil
@@ -13351,101 +13485,29 @@ do
             return true
         end
 
-        -- Real inventory format (Khfresh/game):
-        --   Name  = "FishName | 3500000 KG"  (optional " | Favorite")
-        --   Value = stack count (number), NOT weight
-        local function parseFishWeight(str)
-            if not str or str == "" then return 0 end
-            local s = tostring(str):gsub("^%s+", ""):gsub("%s+$", "")
-            s = s:gsub("%s*[Kk][Gg]%s*$", ""):gsub("^%s+", ""):gsub("%s+$", "")
-            local direct = tonumber(s)
-            if direct then return direct end
-            -- strip non-digits except decimal
-            local digits = s:match("([%d%.]+)")
-            if digits then
-                local n = tonumber(digits)
-                if n then
-                    local upper = string.upper(s)
-                    if upper:find("T", 1, true) then return n * 1e12 end
-                    if upper:find("B", 1, true) then return n * 1e9 end
-                    if upper:find("M", 1, true) and not upper:find("KG", 1, true) then
-                        -- "3.5M" style only when no KG word left
-                        if s:match("[%d%.]+%s*[Mm]%+?$") then return n * 1e6 end
-                    end
-                    if upper:find("K", 1, true) and not upper:find("KG", 1, true) then
-                        if s:match("[%d%.]+%s*[Kk]%+?$") then return n * 1e3 end
-                    end
-                    return n
-                end
-            end
-            return 0
-        end
-
         local function getFishKg(item)
-            if not item then return 0 end
             local w = 0
             pcall(function()
-                local rawName = tostring(item.Name or "")
-                -- strip favorite suffix
-                rawName = string.split(rawName, "| Favorite")[1] or rawName
-                local parts = {}
-                for part in string.gmatch(rawName, "[^|]+") do
-                    parts[#parts + 1] = tostring(part):gsub("^%s+", ""):gsub("%s+$", "")
-                end
-                if #parts >= 2 then
-                    -- "3500000 KG" or first token of weight segment
-                    local weightToken = string.split(parts[2], " ")[1] or parts[2]
-                    w = parseFishWeight(weightToken)
-                    if w <= 0 then w = parseFishWeight(parts[2]) end
-                end
-                if w <= 0 then
-                    local attr = item:GetAttribute("Weight")
-                    if type(attr) == "number" and attr > 0 then w = attr end
-                end
-                -- Legacy: weight embedded in string Value
-                if w <= 0 and type(item.Value) == "string" and string.find(item.Value, "|", 1, true) then
-                    local vparts = {}
-                    for part in string.gmatch(item.Value, "[^|]+") do
-                        vparts[#vparts + 1] = tostring(part):gsub("^%s+", ""):gsub("%s+$", "")
-                    end
-                    if #vparts >= 2 then
-                        w = parseFishWeight(string.split(vparts[2], " ")[1] or vparts[2])
-                    end
-                end
-                -- Child Weight value
-                if w <= 0 then
-                    local child = item:FindFirstChild("Weight") or item:FindFirstChild("Kg")
-                    if child and (child:IsA("NumberValue") or child:IsA("IntValue") or child:IsA("StringValue")) then
-                        w = parseFishWeight(tostring(child.Value))
-                    end
+                if item:IsA("StringValue") then
+                    local parts = {}
+                    for part in string.gmatch(item.Value, "[^|]+") do table.insert(parts, part) end
+                    if #parts >= 2 then w = tonumber((parts[2]:gsub("%D", ""))) or 0 end
+                elseif item:IsA("NumberValue") or item:IsA("IntValue") then
+                    w = tonumber(item.Value) or 0
                 end
             end)
-            return tonumber(w) or 0
+            return w
         end
 
         local function collectBigFish(minKg)
-            minKg = tonumber(minKg) or 2000000
             local out = {}
-            local userData = Data and Data:FindFirstChild(tostring(LocalPlayer.UserId))
-            if not userData then return out end
-            local folders = {}
-            local inv = userData:FindFirstChild("Inventory")
-            local hot = userData:FindFirstChild("Hotbar")
-            if inv then folders[#folders + 1] = inv end
-            if hot then folders[#folders + 1] = hot end
-            for _, folder in ipairs(folders) do
-                for _, item in ipairs(folder:GetChildren()) do
-                    local kg = getFishKg(item)
-                    if kg >= minKg then
-                        local display = tostring(item.Name or "")
-                        display = string.split(display, "| Favorite")[1] or display
-                        local fishName = display
-                        local pipe = string.find(display, "|", 1, true)
-                        if pipe then
-                            fishName = display:sub(1, pipe - 1):gsub("^%s+", ""):gsub("%s+$", "")
-                        end
-                        out[#out + 1] = { item = item, name = fishName, kg = kg, rawName = item.Name }
-                    end
+            local userData = Data:FindFirstChild(tostring(LocalPlayer.UserId))
+            local inv = userData and userData:FindFirstChild("Inventory")
+            if not inv then return out end
+            for _, item in pairs(inv:GetChildren()) do
+                local kg = getFishKg(item)
+                if kg >= minKg then
+                    table.insert(out, { item = item, name = item.Name, kg = kg })
                 end
             end
             table.sort(out, function(a, b) return a.kg > b.kg end)
@@ -13721,7 +13783,7 @@ do
     -- Server
     do
         local ServerSection = ServersTab:CreateSection("Server Hop", "Left")
-        -- Hop = Khfresh relay list, random join, no public/private filter
+        -- Hop = Nexus-style relay list, random join, no public/private filter
         local Http = Services.HttpService
         local TeleportService = Services.TeleportService
         KhfreshState.serverHopApiBase = KhfreshState.serverHopApiBase or "http://103.28.35.190:8000"
@@ -13855,7 +13917,7 @@ do
             return hopApi("/v1/servers/update", "POST", payload) ~= nil
         end
 
-        -- Event kind() + Vermilion / Tortoise
+        -- Same as Nexus kind() + Vermilion / Tortoise
         local function kindOf(s)
             local a = s.attributes or {}
             local event = string.lower(tostring(a.event or ""))
@@ -13869,10 +13931,10 @@ do
             if blob:find("tortoise", 1, true) or blob:find("blacktortoise", 1, true) then
                 return "Black Tortoise Bloodline"
             end
-            -- NPC events (order / tags)
+            -- NPC events (Nexus order / tags)
             if blob:find("taoist", 1, true) then return "Taoist" end
             if blob:find("maoshan", 1, true) then return "Maoshan" end
-            -- Spirit: spirit / god / pray
+            -- Spirit: spirit / god / pray (Nexus: npc=="god")
             if blob:find("spirit", 1, true) or blob:find("god", 1, true) or npc == "god" then
                 return "Spirit"
             end
@@ -13889,7 +13951,7 @@ do
             return w == want or (w ~= "" and (w:find(want, 1, true) or want:find(w, 1, true)))
         end
 
-        -- Join rules: not empty job, not current, not full — then random
+        -- Nexus join rules: not empty job, not current, not full — then random
         local function isJoinable(s)
             local job = tostring(s.job_id or s.jobId or s.id or "")
             if job == "" or job == tostring(game.JobId) then return false end
@@ -14625,7 +14687,6 @@ end
 
 -- ===== SETTINGS TAB =====
 do
-
     local SettingsTab = Window:CreateTab("Settings")
     local CharSection = SettingsTab:CreateSection("Character")
 
@@ -16177,11 +16238,11 @@ do
     end
 end
 
--- ===== ANTI-AFK (Idled + AFK remote + ClickButton2 / Button2Down) =====
+-- ===== ANTI-AFK (Nexus-style: Idled + AFK remote + ClickButton2 / Button2Down) =====
 -- Methods (all pcall'd):
---   1) LocalPlayer.Idled -> nudge (primary)
+--   1) LocalPlayer.Idled -> nudge (Nexus primary)
 --   2) Events.AFK:FireServer() (game remote, no click)
---   3) VirtualUser CaptureController + ClickButton2 + Button2Down/Up
+--   3) VirtualUser CaptureController + ClickButton2 + Button2Down/Up (Nexus)
 --   4) Micro camera yaw (no input steal) as idle heartbeat
 --   5) Slow interval 55-65s — never spam
 local _khLastAfkFire = 0
@@ -16209,13 +16270,13 @@ local function khFireAfkRemote()
     pcall(function()
         local afkEvent = Events and Events:FindFirstChild("AFK")
         if not afkEvent then return end
-        -- FireServer() no args. Also try string variant once.
+        -- Nexus: FireServer() no args. Also try string variant once.
         pcall(function() afkEvent:FireServer() end)
         pcall(function() afkEvent:FireServer("Stay Active") end)
     end)
 end
 
--- VirtualUser: CaptureController + ClickButton2 (also Button2Down/Up)
+-- VirtualUser: CaptureController + ClickButton2 (Nexus also uses Button2Down/Up)
 local function khAntiAfkVirtualUser()
     pcall(function()
         local vu = VirtualUser or game:GetService("VirtualUser")
@@ -16223,7 +16284,7 @@ local function khAntiAfkVirtualUser()
         pcall(function() vu:CaptureController() end)
         -- Classic AFK path
         pcall(function() vu:ClickButton2(Vector2.new()) end)
-        -- Button2Down/Up with camera CFrame
+        -- Nexus path: Button2Down/Up with camera CFrame
         pcall(function()
             local cam = workspace.CurrentCamera
             local cf = cam and cam.CFrame
@@ -16258,7 +16319,7 @@ end
 
 local function khAntiAfkNudge(reason)
     if not alive() or Fishing.Flags.AntiAFK == false then return end
-    -- Skip if player already moving
+    -- Nexus: skip if player already moving
     if khPlayerIsMoving() then return end
     pcall(khAntiAfkVirtualUser)
     pcall(khFireAfkRemote)
@@ -16286,7 +16347,7 @@ initAntiAFK = function()
     if AutoFarmFilters then AutoFarmFilters.AntiAFK = true end
     runtimeEnv.AntiAFKInitialized = true
 
-    -- Primary: Roblox Idled
+    -- Primary: Roblox Idled (same as Nexus)
     local okConn, conn = pcall(function()
         return LocalPlayer.Idled:Connect(function()
             if not alive() or Fishing.Flags.AntiAFK == false then return end
@@ -16317,7 +16378,7 @@ initAntiAFK = function()
         if alive() and Fishing.Flags.AntiAFK ~= false then
             _khLastAfkFire = 0
             khAntiAfkNudge("boot")
-            print("[Khfresh][AntiAFK] armed (Idled + AFK remote + ClickButton2)")
+            print("[Khfresh][AntiAFK] armed Nexus-style (Idled + AFK remote + ClickButton2)")
         end
     end)
     return true
@@ -16453,21 +16514,7 @@ local function farmHookedBoss(target)
         KhfreshLib:Notify({ Title = "Boss Farm", Message = "Farming " ..
         targetType .. ": " .. tostring(target.Name or "Unknown"), Duration = 3 })
     end
-    -- REAL catch phase: AnchorLock keeps bar center; do NOT spam UpdateFishProgression
-    -- (server weave detects progression spam). Only nudge progression slowly when bar is safe.
-    local now = tick()
-    local last = tonumber(Fishing.BossFarm.LastProgress) or 0
-    if now - last < 0.55 then return end
-    local fishing = MainGui and MainGui:FindFirstChild("Fishing")
-    local barFrame = fishing and fishing:FindFirstChild("BarFrame")
-    local bar = barFrame and barFrame:FindFirstChild("Bar")
-    if bar and bar:IsA("GuiObject") then
-        local scale = bar.Position.X.Scale
-        if scale < 0.35 or scale > 0.65 then
-            return -- not in safe zone; wait for AnchorLock
-        end
-    end
-    Fishing.BossFarm.LastProgress = now
+    Fishing.BossFarm.LastProgress = tick()
     pcall(function() safeFire("UpdateFishProgression") end)
 end
 
@@ -16509,16 +16556,11 @@ do
         end
 
         if Fishing.Flags.AntiAFK then
-            -- Rate-limit AFK remote (spam = weave/ban)
-            local lastAfk = tonumber(KhfreshState._lastAfkFire) or 0
-            if tick() - lastAfk >= 45 then
-                KhfreshState._lastAfkFire = tick()
-                pcall(function() safeFire("AFK") end)
-            end
+            pcall(function() safeFire("AFK") end)
         end
     end)
 
-    -- ===== KHFRESH AUTO SKILL LOOP =====
+    -- ===== NEXUS-STYLE AUTO SKILL LOOP =====
     task.spawn(function()
         local warnedMissingRemote = false
         while alive() do
@@ -16864,10 +16906,18 @@ local function selectedFarmAdvanceIslandFromState()
 end
 
 local function tryInstantCatch(token, context)
-    -- REMOVED: Instant Catch banned by server weave. Always disabled.
-    return false
+    if KhfreshState.InstantCatchEnabled ~= true or token == nil then return false end
+    if bossFarmEnabled() then return false end
+    local ok = false
+    pcall(function()
+        -- The dump's DoCleanUp(true, nil) calls FireServer(true, token, nil).
+        ok = safeFire("FishingMinigame", true, token, nil)
+    end)
+    if ok then
+        warn("[Khfresh][InstantCatch] success packet attempted for "..tostring(context or "fish").."; server validation may reject it")
+    end
+    return ok
 end
-
 
 Events.FishingMinigame.OnClientEvent:Connect(function(p1, p2, p3)
     -- The game source sends a table containing FishName for a real minigame.
@@ -17003,7 +17053,16 @@ Events.FishingMinigame.OnClientEvent:Connect(function(p1, p2, p3)
         return
     end
 
-    -- Instant Catch removed (ban weave)
+    -- Experimental instant-catch attempt for ordinary fish. The game dump contains
+    -- the client packet shape but omits the server listener, so normal progression remains active.
+    if KhfreshState.InstantCatchEnabled == true and not bossFarmEnabled()
+        and p3 ~= nil and p1.Boss ~= true and p1.SecretBoss ~= true then
+        task.delay(0.12, function()
+            if alive() and KhfreshState.InstantCatchEnabled == true and not bossFarmEnabled() then
+                tryInstantCatch(p3, p1.FishName or "normal fish")
+            end
+        end)
+    end
 
     -- Normal/Boss fishing path.
     Fishing.BossFarm.CurrentTarget = p1
@@ -17041,22 +17100,10 @@ Events.FishingMinigame.OnClientEvent:Connect(function(p1, p2, p3)
                         break
                     end
                     farmHookedBoss(target)
-                    task.wait(0.35)
+                    task.wait(0.08)
                 else
-                    -- Normal fish: progression only when bar is centered (anti-weave)
-                    local barOk = false
-                    pcall(function()
-                        local f = MainGui and MainGui:FindFirstChild("Fishing")
-                        local b = f and f.BarFrame and f.BarFrame:FindFirstChild("Bar")
-                        if b then
-                            local s = b.Position.X.Scale
-                            barOk = s >= 0.35 and s <= 0.65
-                        end
-                    end)
-                    if barOk then
-                        pcall(function() safeFire("UpdateFishProgression") end)
-                    end
-                    task.wait(0.35)
+                    pcall(function() safeFire("UpdateFishProgression") end)
+                    task.wait(0.2)
                 end
             end
             if bossFarmEnabled() and runId == Fishing.BossFarm.CurrentRunId then
@@ -17078,8 +17125,7 @@ Events.Slam.OnClientEvent:Connect(function(cb)
 end)
 
 -- ===== AUTO ENZO / LONG DIAOHAI — REAL HITS + FAST GREEN HITBOX =====
--- AUTO ENZO / LONG DIAOHAI — REAL QTE (bar inside green hitbox only, no remote spam)
--- Does NOT teleport green hitbox. Does NOT fire Hit every frame.
+-- Uses the game's BossPhase2Action hit packet and advances the hit index on success.
 local lastQTEClick = 0
 local qteHitIndex = 0
 local qteBarWasVisible = false
@@ -17096,82 +17142,53 @@ pcall(function()
     end
 end)
 
-local function qteRangeForGui(bar, zone)
-    if not (bar and bar:IsA("GuiObject") and zone and zone:IsA("GuiObject")) then
-        return nil
-    end
-    if bar.AbsoluteSize.X > 0 and zone.AbsoluteSize.X > 0 then
-        local barCenter = bar.AbsolutePosition.X + bar.AbsoluteSize.X * 0.5
-        local left = zone.AbsolutePosition.X
-        local right = zone.AbsolutePosition.X + zone.AbsoluteSize.X
-        return { mode = "abs", barCenter = barCenter, left = left, right = right }
-    end
-    local bw = bar.Size.X.Scale
-    local bx = bar.Position.X.Scale
-    local barCenter = bx + (0.5 - bar.AnchorPoint.X) * bw
-    local zw = zone.Size.X.Scale
-    local zx = zone.Position.X.Scale
-    local left = zx - zw * zone.AnchorPoint.X
-    local right = left + zw
-    return { mode = "scale", barCenter = barCenter, left = left, right = right }
-end
-
-local function qteCenterInRange(r, pad)
-    if not r then return false end
-    pad = pad or ((r.mode == "abs") and 2 or 0.01)
-    return r.barCenter >= (r.left - pad) and r.barCenter <= (r.right + pad)
-end
-
-local function qteGetBarHitboxRanges(bossBar)
-    if not bossBar then return nil end
-    local bar = bossBar:FindFirstChild("Bar")
+local function qteTeleportGreenHitbox(bossBar)
+    if not bossBar then return end
     local hitbox = bossBar:FindFirstChild("Hitbox")
-    return qteRangeForGui(bar, hitbox)
-end
-
-local function qteBarInGreen(bossBar)
-    local r = qteGetBarHitboxRanges(bossBar)
-    if not r then return false end
-    return qteCenterInRange(r)
-end
-
--- Avoid HitboxBad / red zone (Long Diaohai + Enzo shared BossFightBar)
-local function qteBarInBad(bossBar)
-    if not bossBar then return false end
+    if not (hitbox and hitbox:IsA("GuiObject")) then return end
     local bar = bossBar:FindFirstChild("Bar")
-    if not bar then return false end
-    local badNames = { "HitboxBad", "BadHitbox", "Hitbox_Bad", "RedHitbox", "Bad" }
-    for _, name in ipairs(badNames) do
-        local bad = bossBar:FindFirstChild(name)
-        if bad and bad:IsA("GuiObject") and bad.Visible ~= false then
-            local r = qteRangeForGui(bar, bad)
-            -- stricter: if center is inside bad, treat as bad (no extra pad toward red)
-            if qteCenterInRange(r, (r and r.mode == "abs") and 0 or 0) then
-                return true
+    local width = hitbox.Size.X.Scale
+    if width < 0.04 or width > 0.35 then
+        width = 0.11
+        if bar and bar:IsA("GuiObject") then
+            local barWidth = bar.Size.X.Scale
+            if type(barWidth) == "number" and barWidth > 0.04 and barWidth < 0.35 then
+                width = barWidth
             end
         end
     end
-    -- Also scan children for name containing Bad/Red hitbox
-    for _, ch in ipairs(bossBar:GetChildren()) do
-        if ch:IsA("GuiObject") and ch.Visible ~= false then
-            local n = string.lower(ch.Name)
-            if (string.find(n, "bad", 1, true) or string.find(n, "red", 1, true))
-                and string.find(n, "hit", 1, true) then
-                local r = qteRangeForGui(bar, ch)
-                if qteCenterInRange(r, 0) then
-                    return true
-                end
-            end
+    local pad = 0.02
+    local leftMax = math.max(pad, 1 - width - pad)
+    local previousLeft = hitbox.Position.X.Scale - width * hitbox.AnchorPoint.X
+    local left
+    for _ = 1, 4 do
+        left = pad + math.random() * (leftMax - pad)
+        if math.abs(left - previousLeft) > 0.12 or leftMax - pad < 0.15 then
+            break
         end
     end
-    return false
-end
+    hitbox.Visible = true
+    hitbox.Size = UDim2.new(width, 0, hitbox.Size.Y.Scale, hitbox.Size.Y.Offset)
+    hitbox.Position = UDim2.new(
+        left + width * hitbox.AnchorPoint.X, 0,
+        hitbox.Position.Y.Scale, hitbox.Position.Y.Offset
+    )
 
-local function qteShouldHit(bossBar)
-    -- Must be in green AND not in bad/red
-    if not qteBarInGreen(bossBar) then return false end
-    if qteBarInBad(bossBar) then return false end
-    return true
+    local bad = bossBar:FindFirstChild("HitboxBad")
+    if bad and bad:IsA("GuiObject") and bad.Visible then
+        local badWidth = bad.Size.X.Scale
+        if badWidth > 0.02 and badWidth < 0.4 then
+            local badLeft = pad + math.random() * math.max(0.01, leftMax - pad)
+            if math.abs(badLeft - left) < width + 0.05 then
+                badLeft = left + width + 0.08
+                if badLeft > leftMax then badLeft = pad end
+            end
+            bad.Position = UDim2.new(
+                badLeft + badWidth * bad.AnchorPoint.X, 0,
+                bad.Position.Y.Scale, bad.Position.Y.Offset
+            )
+        end
+    end
 end
 
 local function pressBossPerfectRemote(bossBar)
@@ -17179,22 +17196,26 @@ local function pressBossPerfectRemote(bossBar)
         BossPhase2Action = Events and Events:FindFirstChild("BossPhase2Action")
     end
     if not (BossPhase2Action and BossPhase2Action:IsA("RemoteEvent")) then return false end
-    -- REAL: green zone only, skip HitboxBad
-    if not qteShouldHit(bossBar) then return false end
     local index = math.max(1, tonumber(qteHitIndex) or 1)
+    if math.random(1, 50) == 1 then
+        local ok, err = pcall(function()
+            BossPhase2Action:FireServer({ Hit = false })
+        end)
+        if not ok then warn("[Khfresh][AutoEnzo] Miss action failed:", tostring(err)) end
+        return ok
+    end
     local ok, err = pcall(function()
         BossPhase2Action:FireServer({ Hit = true, Index = index })
     end)
     if ok then
         qteHitIndex = index + 1
+        local moved, moveError = pcall(qteTeleportGreenHitbox, bossBar)
+        if not moved then warn("[Khfresh][AutoEnzo] Hitbox update failed:", tostring(moveError)) end
     else
-        warn("[Khfresh][AutoEnzo] Hit failed:", tostring(err))
+        warn("[Khfresh][AutoEnzo] Hit action failed:", tostring(err))
     end
     return ok
 end
-
--- One hit per green-zone pass (no cooldown slider). Re-arm when leaving green/bad.
-local qteArmed = true
 
 local function runBossQTETick()
     if not alive() then return end
@@ -17210,7 +17231,6 @@ local function runBossQTETick()
         if qteBarWasVisible then
             qteBarWasVisible = false
             qteHitIndex = 0
-            qteArmed = true
         end
         return
     end
@@ -17218,19 +17238,19 @@ local function runBossQTETick()
     if not qteBarWasVisible then
         qteBarWasVisible = true
         if qteHitIndex < 1 then qteHitIndex = 1 end
-        qteArmed = true
+        lastQTEClick = 0
+        local ok, err = pcall(qteTeleportGreenHitbox, bossBar)
+        if not ok then warn("[Khfresh][AutoEnzo] Initial hitbox update failed:", tostring(err)) end
     end
 
-    local canHit = qteShouldHit(bossBar)
-    if not canHit then
-        -- left green or entered bad -> arm next pass
-        qteArmed = true
-        return
-    end
-    if not qteArmed then return end
-    if pressBossPerfectRemote(bossBar) then
-        qteArmed = false -- wait until bar leaves green before next hit
-    end
+    local now = tick()
+    local hitCooldown = KhfreshState.AutoLongDiaohaiEnabled == true
+        and KhfreshState.AutoLongDiaohaiHitCooldown
+        or KhfreshState.AutoEnzoHitCooldown
+    hitCooldown = math.clamp(tonumber(hitCooldown) or 0.15, 0.01, 1)
+    if now - lastQTEClick < hitCooldown then return end
+    lastQTEClick = now
+    pressBossPerfectRemote(bossBar)
 end
 
 pcall(function()
@@ -17452,70 +17472,89 @@ task.defer(function()
         Duration = 2
     })
 end)
+
 ]===============]
 
 function __KhfreshRunHub()
-local ab,ac=loadstring(aa,"@KhfreshHub")
-if not ab then
-error("Khfresh Hub compile error: "..tostring(ac))
-end
-local ad,ae=pcall(ab)
-if not ad then
-error("Khfresh Hub runtime error: "..tostring(ae))
-end
-end
-
-T=function()
-if not S then
-return false
+    local chunk, err = loadstring(__KH_HUB_SRC, "@KhfreshHub")
+    if not chunk then
+        error("Khfresh Hub compile error: " .. tostring(err))
+    end
+    local ok, runErr = pcall(chunk)
+    if not ok then
+        error("Khfresh Hub runtime error: " .. tostring(runErr))
+    end
 end
 
-if not i then
-K.Text="● Key verified - loading script..."
-K.TextColor3=Color3.fromRGB(112,220,148)
-H.Text="LOADING..."
+executeEmbeddedScript = function()
+    if not verified then
+        return false
+    end
+
+    if not FREE_DAY_UTC then
+        Status.Text = "● Key verified - loading script..."
+        Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+        Verify.Text = "LOADING..."
+    else
+        Status.Text = "● FREE ACCESS • " .. CURRENT_UTC_DAY .. " UTC"
+        Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+        Verify.Text = "FREE ACCESS"
+    end
+
+    local runOk, runErr = pcall(function()
+        if type(__KhfreshRunHub) == "function" then
+            __KhfreshRunHub()
+        else
+            error("Hub loader missing")
+        end
+    end)
+
+    if not runOk then
+        Status.Text = "● Embedded script runtime error"
+        Status.TextColor3 = Color3.fromRGB(255, 90, 90)
+        Verify.Text = "RETRY VERIFY"
+        warn("[KHFRESH] Embedded script runtime error:", runErr)
+        return false
+    end
+
+    Status.Text = "● Script loaded successfully"
+    Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+    Verify.Text = "ACCESS GRANTED"
+
+    if FREE_DAY_UTC then
+        task.delay(0.08, function()
+            hideKeySystem()
+        end)
+    end
+
+    return true
+end
+
+--// ============================================================================
+--// UTC FREE DAYS
+--// Thursday / Friday UTC only: launch directly, no key required.
+--// Sunday / Monday / Tuesday / Wednesday UTC: normal key verification.
+--// ============================================================================
+if FREE_DAY_UTC then
+    verified = true
+    Status.Text = "● FREE DAY • " .. CURRENT_UTC_DAY .. " UTC"
+    Status.TextColor3 = Color3.fromRGB(112, 220, 148)
+    Verify.Text = "FREE ACCESS"
+
+    task.delay(0.05, function()
+        local ok, err = pcall(function()
+            executeEmbeddedScript()
+        end)
+
+        if not ok then
+            warn("[KHFRESH] Free-day launch failed:", err)
+        end
+    end)
 else
-K.Text="● FREE ACCESS • "..j.." UTC"
-K.TextColor3=Color3.fromRGB(112,220,148)
-H.Text="FREE ACCESS"
+    -- Normal days: key is required. Saved key can still auto-login.
+    Status.Text = "● " .. CURRENT_UTC_DAY .. " UTC • KEY REQUIRED"
+    Status.TextColor3 = Color3.fromRGB(118, 118, 130)
+    autoLoginSavedKey()
 end
 
-local ab,ac=pcall(function()
-if type(__KhfreshRunHub)=="function"then
-__KhfreshRunHub()
-else
-error"Hub loader missing"
-end
-end)
-
-if not ab then
-K.Text="● Embedded script runtime error"
-K.TextColor3=Color3.fromRGB(255,90,90)
-H.Text="RETRY VERIFY"
-warn("[KHFRESH] Embedded script runtime error:",ac)
-return false
-end
-
-K.Text="● Script loaded successfully"
-K.TextColor3=Color3.fromRGB(112,220,148)
-H.Text="ACCESS GRANTED"
-
-if i then
-task.delay(0.08,function()
-hideKeySystem()
-end)
-end
-
-return true
-end
-
-
-
-
-
-
-K.Text="● "..j.." UTC • KEY REQUIRED"
-K.TextColor3=Color3.fromRGB(118,118,130)
-autoLoginSavedKey()
-
-return k
+return Gui
